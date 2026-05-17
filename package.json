@@ -4,6 +4,7 @@
   "description": "A mock product for connecting GitHub repos to local AI agents over outbound WebSockets.",
   "type": "module",
   "private": true,
+  "license": "MIT",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
