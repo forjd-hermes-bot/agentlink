@@ -2,7 +2,7 @@
 
 A GitHub event bridge for AI agents and bots.
 
-AgentLink is intended to make it easy for tools like **Hermes Agent**, **OpenClaw**, **Codex**, **Claude Code**, **OpenCode**, and custom bots to receive GitHub events such as PR comments, issue comments, new issues, reviews, labels, and CI failures — without each agent needing to implement GitHub Apps, webhook hosting, signature verification, event filtering, or public endpoints.
+AgentLink makes it easy for tools like **Hermes Agent**, **OpenClaw**, **Codex**, **Claude Code**, **OpenCode**, and custom bots to receive GitHub events such as PR comments, issue comments, new issues, reviews, labels, and CI failures — without each agent needing to implement GitHub Apps, webhook hosting, signature verification, event filtering, or public endpoints.
 
 ## Goal
 
@@ -18,6 +18,23 @@ GitHub App event
 ```
 
 The public webhook endpoint belongs to the AgentLink relay. Agent hosts can sit behind NAT/firewalls and only make outbound connections.
+
+## Current status
+
+This repo now contains both:
+
+- a **Bun + React product mockup** for the dashboard/landing page
+- a functional **MVP relay + daemon implementation** for Option A:
+  - hosted relay HTTP server
+  - GitHub webhook signature verification
+  - GitHub event normalization into `agentlink.event.v1`
+  - trigger route matching
+  - outbound WebSocket delivery to a local daemon
+  - command/Hermes/OpenClaw/local HTTP adapter execution
+  - adapter result parsing
+  - GitHub comment posting abstraction
+
+This is still an early MVP, not production SaaS infrastructure yet.
 
 ## Why
 
@@ -35,29 +52,111 @@ GitHub automation usually requires every bot to solve the same plumbing:
 
 AgentLink centralizes that plumbing and exposes a simpler delivery layer for agents.
 
-## Current repo status
+## Architecture
 
-This repo currently contains a **Bun + React product mockup** for the idea:
+```txt
+┌────────────┐      ┌────────────────────┐      ┌──────────────────┐
+│  GitHub    │─────▶│ AgentLink Relay     │─────▶│ Local Daemon      │
+│  Webhooks  │      │ /webhooks/github    │  WS  │ command/http/etc. │
+└────────────┘      └────────────────────┘      └──────────────────┘
+                            │                            │
+                            │                            ▼
+                            │                  Hermes / OpenClaw / bot
+                            ▼
+                    GitHub comments/statuses
+```
 
-- Landing page for “GitHub events for every agent”
-- Trigger route dashboard
-- Example routes for Hermes Agent, OpenClaw, and local commands
-- Live event/job rail
-- Adapter delivery terminal panel
-- Architecture flow
+## Configuration
 
-It is not yet a working relay/daemon implementation.
+Copy the example config:
 
-## Intended delivery targets
+```bash
+cp agentlink.config.example.json agentlink.config.json
+```
 
-AgentLink should be able to route normalized GitHub events to multiple adapter types:
+Then edit:
 
-- **Hermes Agent adapter** — invoke Hermes with GitHub event context
-- **OpenClaw adapter** — forward PR/issue events into OpenClaw
-- **Local command adapter** — run a configured command with the event JSON on stdin
-- **Local HTTP adapter** — POST normalized events to `localhost`
-- **WebSocket adapter** — push events to a long-running local daemon
-- **Custom adapter SDK** — let other bots implement `onEvent(event)`
+- `github.webhook_secret` — GitHub App webhook secret
+- `github.token` — optional GitHub token for MVP comment posting
+- `relay.daemon_token` — shared token for daemon WebSocket auth
+- `routes` — event filters and adapter configuration
+
+Example route:
+
+```json
+{
+  "id": "command-demo",
+  "repos": ["*"],
+  "events": ["issue_comment"],
+  "when": {
+    "body_contains": "@agentlink-demo"
+  },
+  "adapter": {
+    "type": "command",
+    "command": "node examples/echo-agent.mjs"
+  },
+  "allowed_actions": ["comment"]
+}
+```
+
+## Running the relay
+
+```bash
+bun install
+bun run relay
+```
+
+Relay endpoints:
+
+- `GET /health`
+- `POST /webhooks/github`
+- `GET /ws?workspace=...&adapter=...&token=...`
+- `POST /adapter/results`
+
+For local webhook development, point GitHub at a public tunnel or deploy the relay somewhere public. In the final product, this relay is the hosted AgentLink Cloud component.
+
+## Running the daemon
+
+The daemon connects outbound to the relay and executes the matching local adapter.
+
+```bash
+bun run daemon -- connect \
+  --config agentlink.config.json \
+  --relay http://127.0.0.1:8787 \
+  --adapter command \
+  --token change-me-daemon-token
+```
+
+For Hermes:
+
+```bash
+bun run daemon -- connect --adapter hermes --relay https://agentlink.example.com --token "$AGENTLINK_DAEMON_TOKEN"
+```
+
+For OpenClaw:
+
+```bash
+bun run daemon -- connect --adapter openclaw --relay https://agentlink.example.com --token "$AGENTLINK_DAEMON_TOKEN"
+```
+
+## Adapter contract
+
+Adapters receive a normalized event JSON on stdin or HTTP POST.
+
+They can return structured JSON:
+
+```json
+{
+  "actions": [
+    {
+      "type": "comment",
+      "body": "Done — I looked at this."
+    }
+  ]
+}
+```
+
+Plain text stdout is treated as a GitHub comment action.
 
 ## Example normalized event payload
 
@@ -98,6 +197,32 @@ AgentLink should be able to route normalized GitHub events to multiple adapter t
 }
 ```
 
+## GitHub App setup
+
+MVP webhook events:
+
+- Issues
+- Issue comments
+- Pull requests
+- Pull request reviews
+- Pull request review comments
+- Check runs / suites
+- Workflow runs
+
+Suggested MVP permissions:
+
+- Metadata: read
+- Issues: read/write for comments
+- Pull requests: read/write for PR comments/reviews
+- Contents: read if agents need repo context
+- Checks: read if routing on CI events
+
+Set the webhook URL to:
+
+```txt
+https://YOUR-RELAY-HOST/webhooks/github
+```
+
 ## Security model
 
 Default posture:
@@ -109,17 +234,9 @@ Default posture:
 - Daemon/session tokens are scoped to workspace, repos, routes, and adapters.
 - Events are normalized before delivery so adapters do not need raw GitHub payload handling.
 - Dangerous actions such as pushing commits, modifying workflows, or deploying should require approval.
-- GitHub App tokens stay server-side when posting comments/statuses/reviews.
+- GitHub App tokens should stay server-side when posting comments/statuses/reviews.
 
-## Potential MVP modules
-
-- GitHub App installation + repo selection
-- Trigger route config: mentions, labels, PR reviews, issues, failed CI
-- Hosted relay with webhook verification, event normalization, queueing, retries, and audit logs
-- Local daemon with authenticated outbound WebSocket
-- Adapter interface for Hermes Agent and OpenClaw
-- Generic command/stdin adapter
-- GitHub response posting via App tokens
+MVP caveat: `github.token` is a simple token-based comment poster for development. Production should use GitHub App installation tokens.
 
 ## Development
 
@@ -130,9 +247,10 @@ bun install
 bun run dev
 ```
 
-Build:
+Test/build:
 
 ```bash
+bun test
 bun run typecheck
 bun run build
 ```

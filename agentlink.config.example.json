@@ -1,0 +1,56 @@
+{
+  "workspace_id": "forjd-dev",
+  "github": {
+    "webhook_secret": "change-me",
+    "token": "optional-github-token-for-comment-posting"
+  },
+  "relay": {
+    "host": "0.0.0.0",
+    "port": 8787,
+    "daemon_token": "change-me-daemon-token"
+  },
+  "routes": [
+    {
+      "id": "hermes-mentions",
+      "repos": ["forjd/*"],
+      "events": ["issue_comment", "pull_request_review_comment"],
+      "when": {
+        "body_contains": "@agentlink",
+        "target_kind": "pull_request"
+      },
+      "adapter": {
+        "type": "hermes",
+        "command": "hermes chat -q 'Respond to this GitHub event. Return JSON with actions if you want to comment.'",
+        "timeout_ms": 120000
+      },
+      "allowed_actions": ["comment", "propose_patch"]
+    },
+    {
+      "id": "openclaw-mentions",
+      "repos": ["forjd/*"],
+      "events": ["issue_comment", "issues"],
+      "when": {
+        "body_contains": "@openclaw"
+      },
+      "adapter": {
+        "type": "openclaw",
+        "command": "openclaw run --stdin",
+        "timeout_ms": 120000
+      },
+      "allowed_actions": ["comment"]
+    },
+    {
+      "id": "command-demo",
+      "repos": ["*"],
+      "events": ["issue_comment"],
+      "when": {
+        "body_contains": "@agentlink-demo"
+      },
+      "adapter": {
+        "type": "command",
+        "command": "node examples/echo-agent.mjs"
+      },
+      "allowed_actions": ["comment"]
+    }
+  ]
+}

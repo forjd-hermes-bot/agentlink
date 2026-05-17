@@ -7,16 +7,21 @@
   "license": "MIT",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
+    "relay": "bun src/relay/server.ts",
+    "daemon": "bun src/daemon/cli.ts",
+    "test": "bun test",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^6.0.2",
+    "commander": "^14.0.3",
     "lucide-react": "^1.16.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
-    "vite": "^8.0.13"
+    "vite": "^8.0.13",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/bun": "latest",
